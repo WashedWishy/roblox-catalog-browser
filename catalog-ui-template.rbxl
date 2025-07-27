@@ -1,0 +1,92 @@
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local player = game.Players.LocalPlayer
+local gui = script.Parent
+local BASE_URL = "https://<your-deploy-url>/api/searchcatalog"
+-- UI references:
+local template = gui.ItemTemplate
+local list = gui.ItemList
+local searchBox, searchBtn = gui.SearchBox, gui.SearchButton
+local loadMore = gui.LoadMoreButton
+
+local currentCursor, currentParams = nil, {}
+
+local function clearList()
+    for _, c in pairs(list:GetChildren()) do
+        if c:IsA("Frame") and c.Name:match("^Item_") then
+            c:Destroy()
+        end
+    end
+end
+
+local function display(items)
+    for _, item in ipairs(items) do
+        local f = template:Clone()
+        f.Name = "Item_"..item.id
+        f.Visible = true
+        f.Parent = list
+        f.NameLabel.Text = item.name
+        f.CreatorLabel.Text = "By: "..(item.creatorName or "Unknown")
+        if item.price and item.price.robux then
+            f.PriceLabel.Text = item.price.robux.." R$"
+            f.BuyButton.Visible = true
+            f.BuyButton.MouseButton1Click:Connect(function()
+                MarketplaceService:PromptPurchase(player, item.id)
+            end)
+        else
+            f.PriceLabel.Text = "Offsale"
+            f.BuyButton.Visible = false
+        end
+        f.Thumbnail.Image = "https://www.roblox.com/asset-thumbnail/image?assetId="..item.id.."&width=150&height=150&format=png"
+    end
+end
+
+local function fetch(params, cursor)
+    currentParams = params or currentParams
+    local url = BASE_URL.."?"
+        .."Category="..HttpService:UrlEncode(currentParams.Category)
+        .."&Keyword="..HttpService:UrlEncode(currentParams.Keyword or "")
+        ..(currentParams.CreatorTargetId and "&CreatorTargetId="..HttpService:UrlEncode(currentParams.CreatorTargetId) or "")
+        ..(currentParams.MinPrice and "&MinPrice="..HttpService:UrlEncode(currentParams.MinPrice) or "")
+        ..(currentParams.MaxPrice and "&MaxPrice="..HttpService:UrlEncode(currentParams.MaxPrice) or "")
+        .."&Limit=30"
+
+    if cursor then
+        url = url.."&Cursor="..HttpService:UrlEncode(cursor)
+    end
+
+    local ok, res = pcall(HttpService.GetAsync, HttpService, url)
+    if not ok then
+        warn("HTTP Request failed:", res)
+        return
+    end
+    local data = HttpService:JSONDecode(res)
+    if not cursor then
+        clearList()
+    end
+    display(data.data)
+    currentCursor = data.nextPageCursor
+    loadMore.Visible = currentCursor ~= nil
+end
+
+-- UI event connections:
+for _, btn in ipairs(gui.CategoryDropdown:GetChildren()) do
+    if btn:IsA("TextButton") then
+        btn.MouseButton1Click:Connect(function()
+            fetch({ Category = btn.Name, Keyword = searchBox.Text }, nil)
+        end)
+    end
+end
+
+searchBtn.MouseButton1Click:Connect(function()
+    fetch({ Category = currentParams.Category or "All", Keyword = searchBox.Text }, nil)
+end)
+
+loadMore.MouseButton1Click:Connect(function()
+    if currentCursor then
+        fetch(nil, currentCursor)
+    end
+end)
+
+-- Initialize:
+fetch({ Category = "All", Keyword = "" }, nil)
